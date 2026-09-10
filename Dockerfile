@@ -32,6 +32,11 @@ RUN composer install --no-interaction --optimize-autoloader --no-dev
 # 8. Atur hak akses folder storage dan bootstrap/cache agar bisa ditulis oleh Laravel
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
+# Tambahkan ini sebelum EXPOSE 80
+RUN php artisan config:cache
+RUN php artisan route:cache
+RUN php artisan view:cache
+
 # 9. Buka port 80 untuk akses web
 EXPOSE 80
 
