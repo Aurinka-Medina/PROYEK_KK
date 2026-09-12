@@ -1,6 +1,6 @@
 FROM php:8.4-apache
 
-# 2. Install dependensi sistem dan extension PHP yang dibutuhkan Laravel
+# Install dependensi sistem dan extension PHP
 RUN apt-get update && apt-get install -y \
     libpng-dev \
     libonig-dev \
@@ -9,41 +9,71 @@ RUN apt-get update && apt-get install -y \
     unzip \
     git \
     curl \
-    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
+    && docker-php-ext-install \
+    pdo_mysql \
+    mbstring \
+    exif \
+    pcntl \
+    bcmath \
+    gd \
+    && rm -rf /var/lib/apt/lists/*
 
-# 3. Aktifkan modul mod_rewrite Apache untuk routing Laravel
+# Aktifkan mod_rewrite
 RUN a2enmod rewrite
 
-# 4. Atur Document Root Apache mengarah ke folder /public milik Laravel
-ENV APACHE_DOCUMENT_ROOT /var/www/html/public
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/conf-available/*.conf
+# Atur Document Root Laravel
+ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 
-# 5. Tentukan direktori kerja di dalam kontainer
+RUN sed -ri \
+    -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
+    /etc/apache2/sites-available/*.conf
+
+RUN sed -ri \
+    -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
+    /etc/apache2/conf-available/*.conf
+
+# Izinkan .htaccess Laravel
+RUN printf '<Directory /var/www/html/public>\n\
+    AllowOverride All\n\
+    Require all granted\n\
+</Directory>\n' \
+    > /etc/apache2/conf-available/laravel.conf
+
+RUN a2enconf laravel
+
+# Direktori kerja
 WORKDIR /var/www/html
 
-# 6. Salin semua file proyek dari komputer/GitHub ke dalam kontainer
+# Salin proyek
 COPY . .
 
-# 7. Install Composer secara otomatis
+# Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-RUN composer install --no-interaction --optimize-autoloader --no-dev
 
-# 8. Atur hak akses folder storage dan bootstrap/cache agar bisa ditulis oleh Laravel
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+RUN composer install \
+    --no-interaction \
+    --optimize-autoloader \
+    --no-dev
 
-# Tambahkan ini sebelum EXPOSE 80
-RUN php artisan config:cache
-RUN php artisan route:cache
-RUN php artisan view:cache
+# Siapkan direktori Laravel
+RUN mkdir -p \
+    storage/logs \
+    storage/framework/cache \
+    storage/framework/sessions \
+    storage/framework/views \
+    bootstrap/cache
 
-# Buat folder log dan cache jika belum ada, lalu beri izin akses
-RUN mkdir -p /var/www/html/storage/logs /var/www/html/storage/framework/views /var/www/html/storage/framework/sessions
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
-RUN chmod -R 777 /var/www/html/storage /var/www/html/bootstrap/cache
+# Atur permission
+RUN chown -R www-data:www-data \
+    storage \
+    bootstrap/cache
 
-# 9. Buka port 80 untuk akses web
+RUN chmod -R 775 \
+    storage \
+    bootstrap/cache
+
+# Port Apache
 EXPOSE 80
 
-# 10. Jalankan Apache
+# Jalankan Apache
 CMD ["apache2-foreground"]
