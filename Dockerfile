@@ -67,12 +67,12 @@ RUN mkdir -p \
 
 # Atur permission
 RUN chown -R www-data:www-data \
-    storage \
-    bootstrap/cache
+     /var/www/html/storage \
+    /var/www/html/bootstrap/cache
 
 RUN chmod -R 775 \
-    storage \
-    bootstrap/cache
+      /var/www/html/storage \
+    /var/www/html/bootstrap/cache
 
 # Port Apache
 EXPOSE 80
