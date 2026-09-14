@@ -78,4 +78,14 @@ RUN chmod -R 775 \
 EXPOSE 80
 
 # Jalankan Apache
-CMD ["apache2-foreground"]
+CMD ["sh", "-c", "php artisan migrate --force && apache2-foreground"]
+
+RUN docker-php-ext-install \
+    pdo_sqlite \
+    sqlite3 \
+    pdo_mysql \
+    mbstring \
+    exif \
+    pcntl \
+    bcmath \
+    gd
