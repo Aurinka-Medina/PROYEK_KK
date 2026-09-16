@@ -1,21 +1,21 @@
 # ---------- frontend build ----------
 FROM node:20-alpine AS frontend
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json ./
+RUN npm install
 COPY vite.config.js ./
 COPY resources/ ./resources/
 COPY public/ ./public/
 RUN npm run build
 
 # ---------- php runtime ----------
-FROM php:8.2-apache
+FROM php:8.4-apache
 
-# system deps + php exts for Laravel 12 + MySQL
+# system deps + php exts for Laravel 12 + MySQL + SQLite
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl zip unzip \
-    libpng-dev libonig-dev libxml2-dev libzip-dev \
-    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip \
+    libpng-dev libonig-dev libxml2-dev libzip-dev libsqlite3-dev \
+    && docker-php-ext-install pdo_mysql pdo_sqlite mbstring exif pcntl bcmath gd zip \
     && a2enmod rewrite \
     && rm -rf /var/lib/apt/lists/*
 
