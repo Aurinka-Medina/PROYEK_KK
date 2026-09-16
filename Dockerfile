@@ -1,91 +1,60 @@
-FROM php:8.4-apache
+# ---------- frontend build ----------
+FROM node:20-alpine AS frontend
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY vite.config.js ./
+COPY resources/ ./resources/
+COPY public/ ./public/
+RUN npm run build
 
-# Install dependensi sistem dan extension PHP
-RUN apt-get update && apt-get install -y \
-    libpng-dev \
-    libonig-dev \
-    libxml2-dev \
-    zip \
-    unzip \
-    git \
-    curl \
-    && docker-php-ext-install \
-    pdo_mysql \
-    mbstring \
-    exif \
-    pcntl \
-    bcmath \
-    gd \
+# ---------- php runtime ----------
+FROM php:8.2-apache
+
+# system deps + php exts for Laravel 12 + MySQL
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl zip unzip \
+    libpng-dev libonig-dev libxml2-dev libzip-dev \
+    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip \
+    && a2enmod rewrite \
     && rm -rf /var/lib/apt/lists/*
 
-# Aktifkan mod_rewrite
-RUN a2enmod rewrite
+# composer binary
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Atur Document Root Laravel
+# apache serve public/, not root
 ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf \
+    && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
-RUN sed -ri \
-    -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
-    /etc/apache2/sites-available/*.conf
-
-RUN sed -ri \
-    -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
-    /etc/apache2/conf-available/*.conf
-
-# Izinkan .htaccess Laravel
-RUN printf '<Directory /var/www/html/public>\n\
-    AllowOverride All\n\
-    Require all granted\n\
-</Directory>\n' \
-    > /etc/apache2/conf-available/laravel.conf
-
-RUN a2enconf laravel
-
-# Direktori kerja
 WORKDIR /var/www/html
 
-# Salin proyek
+# 1. php deps first (cache layer)
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
+
+# 2. full code
 COPY . .
+COPY --from=frontend /app/public/build ./public/build
 
-RUN mkdir -p database && touch database/database.sqlite
+# 3. autoload optimize + perms
+RUN composer dump-autoload --optimize --no-dev --classmap-authoritative \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
 
-# Install Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# 4. frontend already built in frontend stage.
+# If single-stage wanted instead: RUN npm install && npm run build
+# kept multi-stage: small final image, no node bloat.
 
-RUN composer install \
-    --no-interaction \
-    --optimize-autoloader \
-    --no-dev
+# 5. clear stale cache at build end (user asked config:clear)
+RUN php artisan config:clear || true
 
-# Siapkan direktori Laravel
-RUN mkdir -p \
-    storage/logs \
-    storage/framework/cache \
-    storage/framework/sessions \
-    storage/framework/views \
-    bootstrap/cache
-
-# Atur permission
-RUN chown -R www-data:www-data \
-     /var/www/html/storage \
-    /var/www/html/bootstrap/cache
-
-RUN chmod -R 775 \
-      /var/www/html/storage \
-    /var/www/html/bootstrap/cache
-
-# Port Apache
 EXPOSE 80
 
-# Jalankan Apache
-CMD ["sh", "-c", "php artisan migrate --force && apache2-foreground"]
-
-RUN docker-php-ext-install \
-    pdo_sqlite \
-    sqlite3 \
-    pdo_mysql \
-    mbstring \
-    exif \
-    pcntl \
-    bcmath \
-    gd
+# 6. runtime: key check + migrate + serve. Single CMD only.
+# key:generate NOT forced each boot (would rotate keys, kill sessions).
+# migrate needs live DB, so runtime not buildtime.
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["apache2-foreground"]
